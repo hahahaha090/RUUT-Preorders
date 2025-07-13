@@ -41,6 +41,45 @@
             padding: 0.5rem 1rem;
             border-radius: 0.375rem;
         }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #b8860b;
+        }
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
         @media (max-width: 768px) {
             .dashboard-grid { grid-template-columns: 1fr; }
         }
@@ -97,6 +136,11 @@
                 week: Math.ceil(now.getDate() / 7),
                 year: now.getFullYear()
             };
+        }
+
+        // Phone Validation
+        function validatePhone(phone) {
+            return /^(\+\d+|\d{10})$/.test(phone);
         }
 
         // MAIN APP - Modified to handle public/private routes
@@ -198,12 +242,20 @@
                             <h3 class="text-lg font-semibold mb-4">Sales Summary</h3>
                             <div id="salesSummary" class="space-y-3">
                                 <div class="flex justify-between">
+                                    <span>Total Orders:</span>
+                                    <span id="totalOrders">0</span>
+                                </div>
+                                <div class="flex justify-between">
                                     <span>Total Quantity:</span>
                                     <span id="totalQuantity">0</span>
                                 </div>
                                 <div class="mt-4">
-                                    <h4 class="font-medium mb-2">By Scent:</h4>
-                                    <div id="scentQuantities"></div>
+                                    <h4 class="font-medium mb-2">Order Control:</h4>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="toggleCustomerOrders" checked>
+                                        <span class="slider"></span>
+                                    </label>
+                                    <span id="toggleStatusText" class="ml-2">Customer orders enabled</span>
                                 </div>
                             </div>
                         </div>
@@ -215,7 +267,26 @@
                     </div>
                 </div>
             `;
-            
+
+            // Load order toggle state
+            db.collection('settings').doc('orderStatus').onSnapshot(doc => {
+                const toggle = document.getElementById('toggleCustomerOrders');
+                const statusText = document.getElementById('toggleStatusText');
+                if (doc.exists) {
+                    toggle.checked = doc.data().allowCustomerOrders;
+                    statusText.textContent = doc.data().allowCustomerOrders 
+                        ? "Customer orders enabled" 
+                        : "Customer orders disabled";
+                }
+            });
+
+            // Toggle event listener
+            document.getElementById('toggleCustomerOrders').addEventListener('change', (e) => {
+                db.collection('settings').doc('orderStatus').set({
+                    allowCustomerOrders: e.target.checked
+                });
+            });
+
             loadAnalytics();
             loadOrders();
         }
@@ -235,11 +306,11 @@
                             </div>
                             <div>
                                 <label class="block mb-1">Phone*</label>
-                                <input type="tel" id="customerPhone" required class="form-input">
+                                <input type="tel" id="customerPhone" required class="form-input" placeholder="10 digits or +country code">
                             </div>
                         </div>
                         <div>
-                            <label class="block mb-1">Email (Optional)</label>
+                            <label class="block mb-1">Email</label>
                             <input type="email" id="customerEmail" class="form-input">
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -263,7 +334,15 @@
                 </div>
             `;
             loadScentOptions();
-            document.getElementById('preOrderForm').addEventListener('submit', submitPreOrder);
+            document.getElementById('preOrderForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const phone = document.getElementById('customerPhone').value;
+                if (!validatePhone(phone)) {
+                    alert("Phone must be 10 digits or start with '+'");
+                    return;
+                }
+                submitPreOrder(e);
+            });
         }
 
         // PUBLIC CUSTOMER FORM (No auth required)
@@ -280,11 +359,11 @@
                             </div>
                             <div>
                                 <label class="block mb-1">Phone*</label>
-                                <input type="tel" id="custPhone" required class="form-input">
+                                <input type="tel" id="custPhone" required class="form-input" placeholder="10 digits or +country code">
                             </div>
                         </div>
                         <div>
-                            <label class="block mb-1">Email (Optional)</label>
+                            <label class="block mb-1">Email</label>
                             <input type="email" id="custEmail" class="form-input">
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -308,7 +387,23 @@
                 </div>
             `;
             loadScentOptions('custScent');
-            document.getElementById('customerPreOrderForm').addEventListener('submit', submitCustomerPreOrder);
+            document.getElementById('customerPreOrderForm').addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const phone = document.getElementById('custPhone').value;
+                if (!validatePhone(phone)) {
+                    alert("Phone must be 10 digits or start with '+'");
+                    return;
+                }
+
+                // Check if customer orders are allowed
+                const settings = await db.collection('settings').doc('orderStatus').get();
+                if (!settings.exists || !settings.data().allowCustomerOrders) {
+                    alert("Customer orders are currently disabled. Please contact us directly.");
+                    return;
+                }
+
+                submitCustomerPreOrder(e);
+            });
         }
 
         function renderCustomerFormLink() {
@@ -351,7 +446,7 @@
                 .catch(error => alert("Error: " + error.message));
         }
 
-        function submitCustomerPreOrder(e) {
+        async function submitCustomerPreOrder(e) {
             e.preventDefault();
             const order = {
                 customerName: document.getElementById('custName').value,
@@ -364,12 +459,13 @@
                 source: 'customer'
             };
             
-            db.collection('preorders').add(order)
-                .then(() => {
-                    alert('Thank you for your order!');
-                    document.getElementById('customerPreOrderForm').reset();
-                })
-                .catch(error => alert("Error: " + error.message));
+            try {
+                await db.collection('preorders').add(order);
+                alert('Thank you for your order!');
+                document.getElementById('customerPreOrderForm').reset();
+            } catch (error) {
+                alert("Error: " + error.message);
+            }
         }
 
         // ANALYTICS
@@ -424,7 +520,10 @@
 
             const updateSalesSummary = () => {
                 db.collection('preorders').get().then(snapshot => {
+                    const totalOrders = snapshot.size || 0;
                     const totalQuantity = snapshot.docs.reduce((sum, doc) => sum + (doc.data().quantity || 0), 0);
+                    
+                    document.getElementById('totalOrders').textContent = totalOrders;
                     document.getElementById('totalQuantity').textContent = totalQuantity;
 
                     const scentQuantities = {};
