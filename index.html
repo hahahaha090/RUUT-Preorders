@@ -563,13 +563,7 @@
                     return;
                 }
 
-                // Check if customer orders are allowed
-                const settings = await db.collection('settings').doc('orderStatus').get();
-                if (!settings.exists || !settings.data().allowCustomerOrders) {
-                    alert("Customer orders are currently disabled. Please contact us directly.");
-                    return;
-                }
-
+                // Remove the order status check completely for customer form
                 submitCustomerPreOrder(e);
             });
         }
